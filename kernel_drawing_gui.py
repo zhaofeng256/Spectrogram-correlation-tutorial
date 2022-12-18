@@ -33,7 +33,11 @@ import os
 
 import simpleaudio as sa
 
+from inspect import currentframe, getframeinfo
 
+def get_linenumber():
+    cf = currentframe()
+    return cf.f_back.f_lineno
 class MplCanvas(FigureCanvasQTAgg ):
 
     def __init__(self, parent=None, width=5, height=4, dpi=100):
@@ -56,7 +60,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.f_min = QtWidgets.QLineEdit(self)
         self.f_min.setText('10')
         self.f_max = QtWidgets.QLineEdit(self)
-        self.f_max.setText('16000')
+        self.f_max.setText('22050')
         self.t_length = QtWidgets.QLineEdit(self)
         self.t_length.setText('')
         self.db_saturation=QtWidgets.QLineEdit(self)
@@ -73,7 +77,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.fft_size.addItem('32768')        
         self.fft_size.addItem('65536')    
         self.fft_size.addItem('131072')    
-        self.fft_size.setCurrentIndex(4)
+        self.fft_size.setCurrentIndex(0)
         
         
         self.colormap_plot = QtWidgets.QComboBox(self)
@@ -106,7 +110,6 @@ class MainWindow(QtWidgets.QMainWindow):
              
         self.plotwindow_startsecond=0
         # self.plotwindow_length=120
-        
         openfilebutton=QtWidgets.QPushButton('Open .wav files')
         def openfilefunc():
             self.filecounter=-1
@@ -121,12 +124,15 @@ class MainWindow(QtWidgets.QMainWindow):
             # options |= QtWidgets.QFileDialog.DontUseNativeDialog
             self.filenames, _ = QtWidgets.QFileDialog.getOpenFileNames(self,"QFileDialog.getOpenFileNames()", r"C:\Users\a5278\Documents\passive_acoustics\detector_delevopment\detector_validation_subset","Wav Files (*.wav)", options=options)
             self.filenames = np.array( self.filenames )
-            print(self.filenames)
+            self.wavefile = self.filenames[0]
+            read_wav()
+            plot_spectrogram()
+
         openfilebutton.clicked.connect(openfilefunc)
         
         
         def read_wav():
-                 
+
             audiopath=self.filenames[self.filecounter]
             
             # if self.filename_timekey.text()=='':
@@ -141,37 +147,35 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.time= dt.datetime.strptime( audiopath.split('/')[-1], self.filename_timekey.text() )
 
             self.fs, self.x = wav.read(audiopath)
-            print('open new file: '+audiopath)
+            if (self.x.shape[1] == 2):
+                self.x = self.x[:,0]
+            print('open new file: '+audiopath, self.x.shape, self.fs)
             
             # factor=60
             # x=signal.decimate(x,factor,ftype='fir')
             
             db_saturation=float( self.db_saturation.text() )
-            x=self.x/32767 
-            p =np.power(10,(db_saturation/20))*x #convert data.signal to uPa    
-            
-            fft_size=int( self.fft_size.currentText() )
-            fft_overlap=float(  self.fft_overlap.text() )
-            self.f, self.t, self.Sxx = signal.spectrogram(p, self.fs, window='hamming',nperseg=fft_size,noverlap=fft_size*fft_overlap)
-            # self.t=self.time +  pd.to_timedelta( t  , unit='s')           
-            
+            x=self.x/32767
+            # convert data.signal to uPa
+            p =np.power(10,(db_saturation/20))*x
+            fft_size=int(self.fft_size.currentText())
+            fft_overlap=float(self.fft_overlap.text())
+            self.f, self.t, self.Sxx = signal.spectrogram(p, self.fs,\
+            window='hamming',nperseg=fft_size,noverlap=int(fft_size*fft_overlap))
+            # self.t=self.time +  pd.to_timedelta( t  , unit='s')
         def plot_spectrogram():
-        
             # self.canvas = MplCanvas(self, width=5, height=4, dpi=100)
             # self.setCentralWidget(self.canvas)
             self.canvas.fig.clf() 
             self.canvas.axes = self.canvas.fig.add_subplot(111)
             # self.canvas.axes.cla()
-            
             if self.t_length.text()=='':
                 self.plotwindow_length= self.t[-1] 
                 self.plotwindow_startsecond=0
             else:    
                 self.plotwindow_length=float( self.t_length.text() )
                 
-           
-   
-            
+
             if self.t_limits==None:           
               t1=self.plotwindow_startsecond
               t2=self.plotwindow_startsecond+self.plotwindow_length
@@ -181,29 +185,21 @@ class MainWindow(QtWidgets.QMainWindow):
               t1=self.t_limits[0]
               t2=self.t_limits[1]
               y1=self.f_limits[0]
-              y2=self.f_limits[1]      
-              
-              
-    
-            ix_time=np.where( (self.t>=t1) & (self.t<(t2)) )[0]
-            ix_f=np.where((self.f>=y1) & (self.f<y2))[0]
+              y2=self.f_limits[1]
 
-            plotsxx= self.Sxx[ int(ix_f[0]):int(ix_f[-1]),int(ix_time[0]):int(ix_time[-1]) ] 
-            
+            ix_time=np.where((self.t>=t1) & (self.t<t2))[0]
+            ix_f=np.where((self.f>=y1) & (self.f<y2))[0]
+            plotsxx= self.Sxx[ int(ix_f[0]):int(ix_f[-1]),int(ix_time[0]):int(ix_time[-1]) ]
             colormap_plot=self.colormap_plot.currentText()
             img=self.canvas.axes.imshow( 10*np.log10(plotsxx) , aspect='auto',cmap=colormap_plot,origin = 'lower',extent = [t1, t2, y1, y2])
-          
-            
+
             self.canvas.axes.set_ylabel('Frequency [Hz]')
             self.canvas.axes.set_xlabel('Time [sec]')
             if self.checkbox_logscale.isChecked():
                 self.canvas.axes.set_yscale('log')
             else:
-                self.canvas.axes.set_yscale('linear')        
-                
- 
+                self.canvas.axes.set_yscale('linear')
 
-            
             if self.filename_timekey.text()=='':
                 audiopath=self.filenames[self.filecounter]
                 self.canvas.axes.set_title(audiopath.split('/')[-1])
@@ -213,7 +209,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # img.set_clim([ 40 ,10*np.log10( np.max(np.array(plotsxx).ravel() )) ] )
             clims=img.get_clim()
             img.set_clim([ 30 ,clims[1]] )
-                        
+
             self.canvas.fig.colorbar(img,label='PSD [dB re $1 \ \mu Pa \ Hz^{-1}$]')
 
        # plot annotations
@@ -374,9 +370,10 @@ class MainWindow(QtWidgets.QMainWindow):
         button_plot_prevspectro.clicked.connect(plot_previous_spectro)
     
         button_save=QtWidgets.QPushButton('Save shape csv')
-        def func_savecsv():         
+        def func_savecsv():
+
             options = QtWidgets.QFileDialog.Options()
-            savename = QtWidgets.QFileDialog.getSaveFileName(self,"QFileDialog.getSaveFileName()", r"C:\Users\a5278\Documents\passive_acoustics\detector_delevopment\detector_validation_subset", "csv files (*.csv)",options=options)
+            savename = QtWidgets.QFileDialog.getSaveFileName(self,"QFileDialog.getSaveFileName()", os.path.splitext(self.filenames[0])[0], "csv files (*.csv)",options=options)
             calldata=pd.concat([ self.call_time , self.call_frec,self.call_label], axis=1)
             calldata.columns=['Timestamp','Frequency','Label']
             print(calldata)
